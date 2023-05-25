@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, runTransaction, orderBy, query } from 'firebase/firestore'
 import EditTodo from "./EditTodo"
 import { db } from '../services/firebase.config'
 import { useState, useEffect } from 'react'
@@ -8,6 +8,7 @@ const Todo = () => {
     const collectionRef = collection(db, 'to-do')
     const [createTodo, setCreateTodo] = useState("")
     const [todos, setTodos] = useState([])
+    const [checked, setChecked] = useState([])
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -25,11 +26,54 @@ const Todo = () => {
         }
     }
 
+    const handleDelete = async (id) => {
+        try {
+            window.confirm("Are you sure you want to delete this Item?")
+            const documentRef = doc(db, "to-do", id)
+            await deleteDoc(documentRef)
+            window.location.reload()
+        }
+        catch (error) {
+            console.log(error)
+        }
+    }
+
+    const handleCheck = async (e, todo) => {
+        setChecked(state => {
+            const indexToUpdate = state.findIndex(checkBox => checkBox.id.toString() === e.target.name)
+            let newState = state.slice()
+            newState.splice(indexToUpdate, 1, {
+                ...state[indexToUpdate],
+                ischecked: !state[indexToUpdate].ischecked
+            })
+            setTodos(newState)
+            return newState
+        })
+
+        try {
+            const docRef = doc(db, "to-do", e.target.name)
+            await runTransaction(db, async (transaction) => {
+                const todoDoc = await transaction.get(docRef)
+                if (!todoDoc.exists()) {
+                    throw "Document does not exist."
+                }
+                const newValue = !todoDoc.data().isChecked;
+                transaction.update(docRef, { isChecked: newValue })
+            })
+            console.log("Transaction succcesfully commited.")
+        }
+        catch (error) {
+            console.log("Transaction failed:", error)
+        }
+    }
+
     useEffect(() => {
         const getTodos = async () => {
-            await getDocs(collectionRef).then((todo) => {
-                let todoData = todo.docs.map((doc) => ({ ...doc.data(), id: did }))
+            const q = query(collectionRef, orderBy('timestamp'))
+            await getDocs(q).then((todo) => {
+                let todoData = todo.docs.map((doc) => ({ ...doc.data(), id: doc.id }))
                 setTodos(todoData)
+                setChecked(todoData)
             }).catch((error) => {
                 console.log(error)
             })
@@ -52,27 +96,31 @@ const Todo = () => {
                                 </button>
 
                                 {
-                                    todos.map(({ todo, id }) =>
+                                    todos.map(({ todo, id, isChecked, timestamp }) =>
 
                                         <div key={id} className="todo-list">
                                             <div className="todo-item">
                                                 <hr />
-                                                <span>
+                                                <span className={`${isChecked ? 'done' : ''}`}>
                                                     <div className="checker" >
                                                         <span className="" >
                                                             <input
                                                                 type="checkbox"
+                                                                defaultChecked={isChecked}
+                                                                name={id}
+                                                                onChange={(e) => handleCheck(e, todo)}
                                                             />
                                                         </span>
                                                     </div>
                                                     &nbsp;{todo}<br />
-                                                    <i>10/11/2022</i>
+                                                    <i>{new Date(timestamp.seconds * 1000).toLocaleString()}</i>
                                                 </span>
                                                 <span className=" float-end mx-3">
-                                                    <EditTodo /></span>
+                                                    <EditTodo todo={todo} id={id} /></span>
                                                 <button
                                                     type="button"
-                                                    className="btn btn-danger float-end">Delete
+                                                    className="btn btn-danger float-end"
+                                                    onClick={() => handleDelete(id)}>Delete
                                                 </button>
                                             </div>
                                         </div>
